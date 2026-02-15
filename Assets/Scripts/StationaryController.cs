@@ -9,6 +9,7 @@ public class StationaryController : MonoBehaviour
     public float mouseSensitivity = 100f;
     public float standingHeight = 0.8f;
     public float crouchingHeight = 0.2f;
+    public float crouchSpeed = 8f;
     private float xRotation = 0f;
     private bool isCrouching = false;
 
@@ -24,6 +25,7 @@ public class StationaryController : MonoBehaviour
     public RawImage photoRawImage;
     public Image flashOverlay;
     public TextMeshProUGUI scoreText;
+    public float detectionRadius = 5.0f; // Large detection size
     private int totalPoints = 0;
 
     [Header("Effects")]
@@ -35,11 +37,13 @@ public class StationaryController : MonoBehaviour
         mainCam = GetComponent<Camera>();
         Cursor.lockState = CursorLockMode.Locked;
         
-        // Add AudioSource if missing
+        // Ensure AudioSource exists
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
         
-        photoFrameGroup.gameObject.SetActive(false);
+        // Initial UI States
+        if (photoFrameGroup) photoFrameGroup.gameObject.SetActive(false);
+        if (cameraHolder) cameraHolder.SetActive(false);
         UpdateScore();
     }
 
@@ -49,13 +53,13 @@ public class StationaryController : MonoBehaviour
         HandleCrouch();
         HandleZoom();
 
-        // Camera Toggle (C) 
+        // Toggle Camera with 'C'
         if (Input.GetKeyDown(KeyCode.C)) 
         {
             cameraHolder.SetActive(!cameraHolder.activeSelf);
         }
 
-        // Snap Photo (Left Click) - Only if camera is OUT
+        // Take Photo with 'Left Click'
         if (cameraHolder.activeSelf && Input.GetMouseButtonDown(0))
         {
             StartCoroutine(TakeAndScorePhoto());
@@ -77,39 +81,39 @@ public class StationaryController : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.LeftControl)) isCrouching = !isCrouching;
         float targetY = isCrouching ? crouchingHeight : standingHeight;
-        Vector3 targetPos = new Vector3(0, targetY, 0);
-        transform.localPosition = Vector3.Lerp(transform.localPosition, targetPos, Time.deltaTime * 8f);
+        transform.localPosition = Vector3.Lerp(transform.localPosition, new Vector3(0, targetY, 0), Time.deltaTime * crouchSpeed);
     }
 
     void HandleZoom()
     {
-        // Hold Right Mouse Button to Zoom
         float targetFOV = Input.GetMouseButton(1) ? zoomFOV : normalFOV;
         mainCam.fieldOfView = Mathf.Lerp(mainCam.fieldOfView, targetFOV, Time.deltaTime * zoomSpeed);
     }
 
     IEnumerator TakeAndScorePhoto()
     {
-        // 1. DETECTION (SphereCast is better than Raycast for moving targets)
-        // This shoots a "thick" line (0.5 radius) to make it easier to hit aliens
+        // 1. DETECTION (SphereCast shoots a thick pipe instead of a thin laser)
         Ray ray = mainCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-        if (Physics.SphereCast(ray, 0.5f, out RaycastHit hit, 100f))
+        RaycastHit hit;
+
+        if (Physics.SphereCast(ray, detectionRadius, out hit, 100f))
         {
             Alien a = hit.collider.GetComponent<Alien>();
+            if (a == null) a = hit.collider.GetComponentInParent<Alien>();
+
             if (a != null && !a.hasBeenPhotographed)
             {
                 totalPoints += a.GetPoints();
                 a.hasBeenPhotographed = true;
                 UpdateScore();
-                // We don't destroy immediately so the alien appears in the photo
                 StartCoroutine(DestroyAlienDelayed(a.gameObject));
             }
         }
 
-        // 2. VISUALS
+        // 2. VISUALS: Sound and Flash
         if(shutterSound) audioSource.PlayOneShot(shutterSound);
         flashOverlay.color = Color.white;
-        cameraHolder.SetActive(false); // Hide the "cube" from the photo
+        cameraHolder.SetActive(false); // Hide camera tool from photo
 
         yield return new WaitForEndOfFrame();
 
@@ -145,7 +149,7 @@ public class StationaryController : MonoBehaviour
     IEnumerator DestroyAlienDelayed(GameObject alien)
     {
         yield return new WaitForSeconds(0.1f);
-        Destroy(alien);
+        if(alien != null) Destroy(alien);
     }
 
     void UpdateScore() 
